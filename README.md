@@ -1,6 +1,5 @@
 # The-Interview-Attendance-Problem
 
-Summary:
 Performed data wrangling on a messy data set obtained from Kaggle and then analyzed the data to see how interview attendance depended on various factors using both numerical and visual methods.
 
 RPubs link: 
