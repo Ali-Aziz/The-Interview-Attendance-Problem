@@ -1,0 +1,712 @@
+---
+title: "Data Wrangling Project"
+author: "Ali Aziz"
+date: '`r Sys.Date()`'
+output: html_document
+---
+
+# The Interview Attendance Problem {.tabset .tabset-pills .tabset-fade}
+
+## Introduction
+In this analyis I will be addressing the interview attendance problem. If a candidate does not show up for his/her interview then it wastes the time and effort of the company's employees. By understanding which factors influence attendence and in what manner, companies can adjust their recruitment process to make it more effective.   
+
+For this study I will be using interview data collected by a group of researchers in India from 2014 till 2016. First the raw data will be tidied and prepared for analysis. Then, detailed exploratory data analysis will be conducted to identify the most important factors that impact interview attendance and to reveal insights and trends. 
+
+Consumers of this analysis will be able to learn and visualize how interview attendance varies with and depends on various factors and they will know how to tidy the data set if they wish to conduct analyses of their own. 
+
+
+
+## Packages Required
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse) # contains ggplot2 for data visualization, 
+                   # dplyr for data manipulation
+                   # tidyr for data tidying
+                   # readr for data import
+                   # purrr for functional programming
+                   # tibble for tibbles, a modern re-imaginging of data frames
+                   # stringr for working with strings
+library(lubridate) # for working with dates
+library(DT) # to create HTML widget for displaying R data object
+library(knitr) # reporting tools 
+library(RColorBrewer) # for color palettes
+library(wordcloud) # to make word clouds 
+library(corrplot) # to visualize correlation matrices
+```
+
+## Data Preparation
+The dataset for this problem was obtained from Kaggle and can be downloaded from 
+[here](https://www.kaggle.com/vishnusraghavan/the-interview-attendance-problem/data). It contains information about interview attendance gathered from the recruitment industry in India. The period of collection was from September 2014 till January 2017. The data consists of details about the person being interviewed, the nature of the interview itself, as well as answers from the interviewees to a set of questions asked by the recruiter. This makes for 23 variables in total. Since most variables in this data set have string values, the main challenge in cleaning the data will be correcting the values and bringing consistency. Missing values are also encoded in various ways using empty strings or strings such as "NA" so this will also need to be addressed. More details will follow along with the cleaning steps. 
+
+To start with, the data was imported and its dimensions checked. 
+
+```{r}
+rm(list = ls()) # Clean environment
+interview_data <- read.csv("Interview.csv") # Import data
+dim(interview_data) # Check dimensions of data
+```
+
+We can see that the data contains 1234 observations of 28 variables. There are 5 more variables than were expected, so this should be kept in mind going forward. 
+
+When you start exploring your data, it always helps just to take a quick look and browse through the observations. First I used the head command to list the first 10 rows, then I took a look at the data in tibble format and finally I viewed the dataset in the data viewer. 
+
+
+```{r, results = 'hide'}
+# Print out first 10 rows of data frame
+head(interview_data, 10)
+
+# Viewing the data as a tibble
+as_tibble(interview_data)
+
+# Browse through the dataset in the data viewer
+View(interview_data)
+```
+
+One thing that immediately stands out are the long and messy variable names. Also, the last few variables starting with "X" were empty so these were removed. Additionally, the "Expected.Attendance" variable containted the results of a predictive model employed by the uploader so it was removed as well. 
+
+```{r, results = 'hide'}
+# Variables starting with "X" at the end only contain missing values
+interview_data %>%
+  select(starts_with("X")) %>%
+  summary()
+
+# Remove "Expected.Attendance"  and variables starting with "X"
+interview_data <- interview_data %>%
+                    select(-starts_with("X"), -Expected.Attendance)
+```
+
+Next I improved the variables name by making them more compact and easy to read using the underscore separated convention (it was not really feasible to automate this since many variable changes were drastically shortened). 
+
+```{r}
+# Original variable names
+names(interview_data)
+
+# Renaming the variables
+names(interview_data) <- c("date", "client", "industry", "location", "position", "skillset", "interview_type", "candidate_ID", "gender", "c_loc", "job_loc", "interview_loc", "native_loc", "permission_to_start", "unscheduled_meetings", "phone_call", "alternative_number", "printout_and_jd", "venue_clarity", "call_letter", "attendance", "marital_status")
+```
+
+The structure and statistics of the data were then observed.  
+```{r, results = 'hide'}
+# See structure of the data
+glimpse(interview_data)
+
+# See summary statistics 
+summary(interview_data)
+```
+
+Fortunately the data follows the main principles of tidy data i.e. all rows are observations and all columns represent variables. However, the data needs a lot of cleaning before it can be analysed. The summary revealed many inconsistincies and errors in the data. For example values were incorrect or in different formats and there were capitilization and spelling errors. So I tackled the issues one at a time. 
+
+```{r, results = 'hide', warning=FALSE}
+
+# Date variable
+
+# With a few exceptions, all dates appeared to be in the order day-month-year however the formats were different e.g. 06.02.2016, 04/12/16 etc.
+# However some dates also had time information e.g. "28.8.2016 & 11.00 AM" so these had to be modified
+
+interview_data$date <- gsub( " .*$", "", interview_data$date) # pick up the substring before the space 
+                                                              # so that time information is removed
+# Convert to date format
+interview_data$date <- interview_data$date %>%
+                         dmy() 
+
+# Add week variable
+interview_data <- interview_data %>%
+                    filter(is.na(date) == F) %>%
+                    mutate(week = strftime(date, format = "%V"))
+
+# Convert to character
+interview_data$date <- as.character(interview_data$date)
+
+# Separate Date into Year, Month and Day to allow analysis by these variables
+interview_data <- interview_data %>%
+                    separate(date, c("year", "month", "day"))
+
+# A handful of entries have Year > 2017 but data was collected onlyl till 2017 so make these 2017
+interview_data[interview_data$year > 2017 & !is.na(interview_data$year), "year"] <- 2017
+
+# Client variable
+unique(interview_data$client) # garbage values and typing mistakes observed
+
+# Observe row containing garbage Client value, it is empty 
+filter(interview_data, client == "﻿﻿")
+
+# Remove row containing garbage Client value 
+interview_data <- interview_data %>%
+                    filter(client != "﻿﻿")
+
+# Fix typos 
+interview_data$client[str_detect(interview_data$client, 
+                                 regex('.*Hewitt.*', 
+                                       ignore_case = T))] <- "Aon Hewitt"
+
+interview_data$client[str_detect(interview_data$client, 
+                                 regex('Standard Chartered Bank.*', 
+                                       ignore_case = T))] <- "Standard Chartered Bank"
+
+# Industry variable
+unique(interview_data$industry)
+# Abbreviate long value 
+interview_data$industry <- str_replace(interview_data$industry, 
+                                       regex('IT Products and Services'), 
+                                       "IT P and S")
+# Convert to factor
+interview_data$industry <- as.factor(interview_data$industry)
+
+# Location variable
+unique(interview_data$location) # Several typos 
+
+# Fix typos 
+interview_data$location[str_detect(interview_data$location, 
+                                   regex('Chennai', ignore_case = T))] <- "Chennai"
+
+interview_data$location[str_detect(interview_data$location, 
+                                   regex('Gurgaon.*', ignore_case = T))] <- "Gurgaon"
+
+levels(interview_data$location) <- c(levels(interview_data$location), "Cochin")
+interview_data$location[str_detect(interview_data$location, 
+                                   regex('.*Cochin.*', ignore_case = T))] <- "Cochin"
+
+# Position variable
+
+# 'Niche' refers to positions that require rare skill sets while 'Routine' refers to ones that need more common skill sets
+unique(interview_data$position)
+summary(interview_data$position)
+
+# There are unexpected values like 'Selenium testing'. Since the number of observations are small, will add them to Niche (assumption is that the skillset is rare)
+interview_data$position[interview_data$position != "Routine"] <- "Niche" 
+
+# Drop unused levels 
+interview_data$position <- droplevels(interview_data$position)
+
+# Skillset variable 
+unique(interview_data$skillset) # Very messy
+summary(interview_data$skillset)
+
+# Fix typos and group together values
+interview_data$skillset[str_detect(interview_data$skillset, 
+                                   regex('.*java.*', ignore_case = T))] <- "Java"
+interview_data$skillset[str_detect(interview_data$skillset, 
+                                   regex('.*sccm.*', ignore_case = T))] <- "SCCM"
+levels(interview_data$skillset) <- c(levels(interview_data$skillset), "Testing")
+interview_data$skillset[str_detect(interview_data$skillset, 
+                                   regex('.*testing.*', ignore_case = T))] <- "Testing"
+levels(interview_data$skillset) <- c(levels(interview_data$skillset), "Banking")
+interview_data$skillset[str_detect(interview_data$skillset, 
+                                   regex('.*lending.*|.*bank.*', ignore_case = T))] <- "Banking"
+interview_data$skillset[str_detect(interview_data$skillset, 
+                                   regex('.*CDD KYC.*', ignore_case = T))] <- "AML/KYC/CDD"
+
+# Group together less frequently (<=20) skillsets into "Other"
+skills <- sort(summary(interview_data$skillset), decreasing = T)
+top_skills <- skills[skills > 20]
+levels(interview_data$skillset) <- c(levels(interview_data$skillset), "Other")
+interview_data$skillset[!(interview_data$skillset %in% names(top_skills))] <- "Other"
+
+# Interview type variable
+unique(interview_data$interview_type) # should be just 'Scheduled', 'Walk-In' or 'Scheduled Walk-In' but lots of typos
+
+levels(interview_data$interview_type) <- c(levels(interview_data$interview_type), "Scheduled Walk-In")
+interview_data$interview_type[str_detect(interview_data$interview_type, 
+                                         regex('.*schedule.*walk.*|Sced.*walk.*', ignore_case = T))] <- "Scheduled Walk-In"
+
+levels(interview_data$interview_type) <- c(levels(interview_data$interview_type), "Walk-In")
+interview_data$interview_type[str_detect(interview_data$interview_type, 
+                                         regex('walkin', ignore_case = T))] <- "Walk-In"
+
+# Remove white spaces
+interview_data$interview_type <- str_trim(interview_data$interview_type)
+
+# Convert to factor
+interview_data$interview_type <- as.factor(interview_data$interview_type)
+
+# Candidate ID variable
+# Remove 'Candidate' prefix (replace with empty string) and leave number
+interview_data$candidate_ID <- str_replace(interview_data$candidate_ID, 
+                                           regex('Candidate ', ignore_case = T), "")
+# Convert to int
+interview_data$candidate_ID <- as.numeric(interview_data$candidate_ID)
+
+# Gender variable
+unique(interview_data$gender) # Looks okay
+summary(interview_data$gender)
+
+# Candidate location variable
+unique(interview_data$c_loc) # similar problems to 'location' variable 
+
+# Fix typos
+interview_data$c_loc[str_detect(interview_data$c_loc, 
+                                             regex('Chennai', ignore_case = T))] <- "Chennai"
+interview_data$c_loc[str_detect(interview_data$c_loc, 
+                                             regex('Gurgaon.*', ignore_case = T))] <- "Gurgaon"
+levels(interview_data$c_loc) <- c(levels(interview_data$c_loc), "Cochin")
+interview_data$c_loc[str_detect(interview_data$c_loc, 
+                                             regex('.*Cochin.*', ignore_case = T))] <- "Cochin"
+
+# This variable seems to be the same as 'location', confirm this
+setequal(interview_data$c_loc, 
+         interview_data$location)
+
+# Since TRUE, remove 'location' variable 
+interview_data <- interview_data %>% select(-location) 
+
+# Job location variable 
+unique(interview_data$job_loc)
+
+# Fix typo
+levels(interview_data$job_loc) <- c(levels(interview_data$job_loc), "Cochin")
+interview_data$job_loc[str_detect(interview_data$job_loc, 
+                                       regex('.*Cochin.*', ignore_case = T))] <- "Cochin"
+
+# Interview venue variable 
+unique(interview_data$interview_loc)
+
+# Fix typo
+levels(interview_data$interview_loc) <- c(levels(interview_data$interview_loc), "Cochin")
+interview_data$interview_loc[str_detect(interview_data$interview_loc, 
+                                          regex('.*Cochin.*', ignore_case = T))] <- "Cochin"
+
+# Candidate native location variable
+unique(interview_data$native_loc)
+
+# Fix typo
+interview_data$native_loc[str_detect(interview_data$native_loc, 
+                                                    regex('.*Cochin.*', ignore_case = T))] <- "Cochin"
+
+# Married variable
+unique(interview_data$marital_status) # looks okay
+```
+
+There are 8 variables in the data set that should have the values 'Yes' or 'No' (if not missing). Seven of these contain answers from interviewees to questions asked by recruiters and the eighth variable tells us whether the candidate attended the interview (the response variable). But the answers contained a mix of other strings as well as many typos and mistakes. Furthermore, missing values were represented using variations of the string "NA" or blank strings so these also had to be dealt with. 
+
+```{r, results = 'hide'}
+
+# See the different values
+apply(select(interview_data, permission_to_start:attendance ), 2, unique)
+
+# Subset the "Yes/No" columns for convenience and readibility 
+answers <- interview_data[, 15:22]
+
+# Make No's and Yes'es consistent 
+answers <- apply(answers, 2, str_replace, regex('No.*',  ignore_case = T), "No")
+answers <- apply(answers, 2, str_replace, regex('Yes.*', ignore_case = T), "Yes")
+
+# Change all NA strings to missing values
+answers <- apply(answers, 2, str_replace, regex('NA', ignore_case = T), "NA")
+interview_data[interview_data == "NA" | interview_data == ""] <- NA
+
+# Change all remaining strings (e.g. 'Uncertain', 'Not yet') to No
+answers[is.na(answers) == F & answers != "Yes"] <- "No"
+
+# Update data
+interview_data[, 15:22] <- answers
+```
+
+The data types were also changed where appropriate. 
+
+```{r}
+# Change data types
+interview_data[c("year", "month", "week", "day", "candidate_ID")] <-
+  sapply(interview_data[c("year", "month", "week", "day", "candidate_ID")], as.integer)
+
+for (i in 15:23) {
+  interview_data[i] <- as.factor(interview_data[, i])
+}
+```
+
+
+Finally, the columns were arranged in a more logical fashion. 
+
+```{r}
+interview_data <- interview_data %>% 
+                    select(candidate_ID, # start with ID field
+                           year, month, week, day, client:interview_type, # interview details
+                           c_loc:native_loc, # location information
+                           gender, marital_status, # candidate details
+                           permission_to_start:call_letter, # answers to questions
+                           attendance) # response variable at the end 
+```
+
+All the variables have now been cleaned up and the resulting data frame is shown below in Table 1.
+
+```{r}
+datatable(
+  interview_data,
+  rownames = F,
+  caption = "Table 1: Tidy Data Set",
+  options = list(
+    # List maximum of 6 characters for columns with lenght values 
+    # (rest appears as ..., full name appears in tool tip)
+    columnDefs = list(list(
+      targets = c(5, 6, 8, 9),
+      render = JS(
+        "function(data, type, row, meta) {",
+        "return type === 'display' && data.length > 6 ?",
+        "'<span title=\"' + data + '\">' + data.substr(0, 6) + '...</span>' : data;",
+        "}"
+      )
+    )),
+    # Change background color of table header
+    initComplete = JS(
+      "function(settings, json) {",
+      "$(this.api().table().header()).css({'background-color': '#000', 'color': '#fff'});",
+      "}"
+    )
+  )
+)
+```
+
+A description of the final set of variables is as follows:
+
+```{r}
+variable_name <- colnames(interview_data)
+variable_type <- lapply(interview_data, class)
+variable_desc <- c("The candidate ID, unique field",
+"Year of interview",
+"Month of interview",
+"Week of interview",
+"Day of interview",
+"Name of company",
+"Industry to which company belongs",
+"Whether position to which candidate is applying is niche (requires rare skill set) or routine (requires common skill set)",
+"Whether the candidate has a niche/rare or routine/common skill set",
+"Type of interview: Scheduled, Walk-in or Scheduled Walk-in",
+"City where candidate currently resides",
+"Location of job for which candidate is interviewing",
+"Venue of the interview",
+"City where the candidate is originally from",
+"Male or Female",
+"Single or Married",
+"Whether candidate has acquired permission to start at the required time",             
+"Whether candidate hopes there will be no unscheduled meetings",
+"Whether candidate is happy to be called 3 hours before the interview and after the interview for a follow-up",
+"Whether candidate has provided alternative number",
+"Whether candidate has printed updated resume and has read/understood the job description (JD)",
+"Whether the venue details are clear to the candidate", 
+"Whether the call letter has been shared with the candidate",
+"The response variable, whether the candidate attended the interview or not. Yes or No")
+
+data_desc <- as_data_frame(cbind(variable_name, variable_type, variable_desc))
+colnames(data_desc) <- c("Variable Name", "Data Type", "Description")
+kable(data_desc)
+```
+
+## Exploratory Data Analysis (EDA) {.tabset .tabset-pills .tabset-fade}
+
+The EDA can be broken down into 4 main parts:
+
+1. General statistics such as overall interview attedance
+2. Relationship of Attendance with other variables
+3. Correlation analysis
+4. Trends over time 
+
+As described earlier, the Date information was separated into Year, Month and Day variables to facilitate analysis across these components. Since all variables were categorical the array of visualiztion methods was restricted and bar charts were used heavily. 
+
+### Create new variables
+
+Four more new variables were created to be able to investigate things like how attendance changes depending on whether the interview venue is in the same city as where the candidate is located or not. 
+
+```{r results = 'hide'}
+# Combining location information to create new variables 
+interview_data <- interview_data %>%
+                   mutate(
+                    venue_same_city = as.character(c_loc) == as.character(interview_loc), 
+                    job_same_city =   as.character(c_loc) == as.character(job_loc),
+                    job_in_native_city = as.character(job_loc) == as.character(native_loc), 
+                    venue_in_native_city = as.character(interview_loc) == as.character(native_loc)
+                    )
+```
+
+### General 
+
+To start with it makes sense to see what proportion of candidates did not show up for their interviews. This number turns out to be around 35-40% which is surprisingly large. 
+
+```{r, fig.width=10,fig.height=2}
+# Visualize what percentage of people attended the interview (attendance does not have any missing values)
+percentages <- data.frame(round(table(interview_data$attendance == "Yes" ) / nrow(interview_data)*100, 1))
+names(percentages) <- c("Attended", "Percentage")
+
+ggplot(percentages, aes(x = 1, y = Percentage, fill = Attended)) +
+  geom_bar(stat = 'identity', position = "fill") + 
+  coord_flip() + 
+  scale_y_continuous(name = "Attendance Percentage", labels = scales::percent, breaks = seq(0, 1 , 0.1)) +
+  theme(text = element_text(size = 16), 
+        axis.title.y = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank()) +
+  ggtitle("Interview Attendance Percentage", 
+  subtitle = "For the recruitment industry in India from September 2014 till January 2017") +
+  scale_fill_manual("Attended", values = c("FALSE" = "black", "TRUE" = "blue"))
+```
+
+Next I looked at the main locations in the data set with respect to where the Candidates were located at the time of the interview (Current), where they originally hailed form (Native), where the interview was (Venue) and where the job itself was located (Job). Chennai dominates the distribution and Bangalore comes in at number two. The native locations of the candidates have the most variety which makes sense (jobs are concentrated in metropolitan areas). 
+
+```{r, warning=FALSE}
+# Location information 
+facet_names <- c(`c_loc` = "Current",
+                 `native_loc` = "Native",
+                 `interview_loc` = "Venue",
+                 `job_loc` = "Job"
+                 )
+
+interview_data %>%
+  select(c_loc:native_loc) %>%
+  gather() %>%
+  group_by(value, key) %>%
+  summarize(n = n()) %>% 
+  filter(n >= 20) %>%
+  ggplot(aes(x = value, y = n)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  facet_grid(key ~ ., labeller = as_labeller(facet_names)) +
+  scale_y_continuous(name = "Number of interviews") + 
+  scale_x_discrete(name = "City") +
+  ggtitle("Most common locations", 
+  subtitle = "The main cities with respect to candidates and jobs.")
+```
+
+The most common skills were also visualized in the form of a word cloud which makes it easy to see that Java skills were in high demand. 
+
+```{r}
+# Wordcloud for popular skills 
+pal <- brewer.pal(12, "Paired")
+words <- names(table(interview_data$skillset)[table(interview_data$skillset) > 0])
+freq <- table(interview_data$skillset)[table(interview_data$skillset) > 0]
+wordcloud(words, freq, random.order = FALSE, max.words = 12,
+          rot.per = 0, colors = pal, scale = c(4,.9))
+```
+
+### Closer look at Attendance
+
+Looking at the attendance percentage across industries we can see that IT Products and Services has a high interview attendance rate of approximately 80%. The Telecom industry on the other hand ranks at the bottom as 60% of candidates do not make it to their interviews.  
+```{r}
+# Attendance percentage across industries
+interview_data %>% 
+  group_by(industry) %>%
+  summarise(attendance_pct = round(sum(attendance == "Yes") / n(), 1)) %>%
+  ggplot(aes(x = reorder(industry, attendance_pct), y = attendance_pct)) + 
+  geom_bar(stat = "identity", fill = "blue") + 
+  scale_y_continuous(name = "Attendance Percentage", labels = scales::percent) +
+  scale_x_discrete(name = "Industry") +
+  coord_flip() + 
+  ggtitle("Interview Attendance Percentage for each Industry")
+```
+
+On the company side, it seems like ANZ is doing well since candidates seem quite likely to attend their interviews with them. Prodapt on the other hand should be quite worried. 
+```{r}
+# Attendance percentage across clients (minimum 10 interviews)
+interview_data %>% 
+  group_by(client) %>%
+  filter(n() >= 10) %>%
+  summarise(attendance_pct = round(sum(attendance == "Yes") / n(), 1)) %>%
+  ggplot(aes(x = reorder(client, attendance_pct), y = attendance_pct)) + 
+  geom_bar(stat = "identity", fill = "blue") + 
+  scale_y_continuous(name = "Attendance Percentage", labels = scales::percent) +
+  scale_x_discrete(name = "Client") +
+  coord_flip() + 
+  ggtitle("Interview Attendance Percentage for each Client")
+```
+
+Using the newly created variables, in the following figure we see that most of the time the interviews are for jobs in the same city and are for candididates who are in the same city. It is important to clarify that the legend indicates whether the variable on the x-axis is True or False (it does not depict Attendance). 
+```{r}
+# How number of interviews depends on things like if venue is in same city or not
+interview_data %>%
+  select(venue_same_city:venue_in_native_city) %>%
+  gather(location_info, value) %>%
+  group_by(location_info, value) %>%
+  summarize(n = n()) %>%
+  ggplot(aes(x = location_info, y = n, fill = value)) +
+  geom_bar(stat = "identity", position = "dodge") + #position_dodge()) 
+  scale_y_continuous(name = "Number of Interviews") +
+  scale_x_discrete(name = "Location information", 
+                    labels = c("Job in native city", 
+                               "Job in same city", 
+                               "Venue in native city", 
+                               "Venue in same city")) +   
+  scale_fill_manual("Value", values = c("FALSE" = "black", "TRUE" = "blue")) + 
+  ggtitle("Variation in Number of interviews across various location relationships")
+```
+
+The next figure is similar but instead looks at Attendance percentage. It is interesting to see that the percentage stays more or less the same across these variables. From the rightmost pair of bars we can see that When the venue is not in the same city then attendance drops. This makes sense however the gap is not as large as we might expect. 
+```{r}
+# How Attendance percentage depends on things like if venue is in same city or not
+interview_data %>%
+  select(attendance:venue_in_native_city) %>%
+  gather(variable, value, -attendance) %>%
+  group_by(variable, value) %>%
+  summarize(n = sum(attendance == "Yes")/n()) %>%
+  ggplot(aes(x = variable, y = n, fill = value)) +
+  geom_bar(stat = "identity", position = "dodge") + 
+  scale_y_continuous(name = "Attendance percentage", labels = scales::percent) +
+  scale_x_discrete(name = "Location information", 
+                    labels = c("Job in native city", "Job in same city", "Venue in native city", "Venue in same city")) +   scale_fill_manual("Value", values = c("FALSE" = "black", "TRUE" = "blue")) + 
+  ggtitle("Variation in Attendance Percentage across various location relationships")
+```
+
+Prior to their interviews, candidates were given a list of "Yes/No" questions to answer. The responses of the candidates can be an indication of their level of engagement and enthusiasm. From the graph below we can clearly see that candidates who answered in the affirmative to any of the questions (such as whether they had printed out their CV and viewed the job description) were much more likely to attend than whose who answered "No". Candidates who did not respond at all fell somewhere in between which is not surprising. 
+
+```{r, warning=FALSE}
+# Answers to questions 
+interview_data %>%
+  select(permission_to_start:attendance) %>%
+  gather(Question, Answered, -attendance) %>%
+  group_by(Question, Answered) %>%
+  summarize(n = sum(attendance == "Yes")/n()) %>%
+  ggplot(aes(x = Question, y = n, fill = Answered)) +
+  geom_bar(stat = "identity", position = "dodge") + 
+  scale_y_continuous(name = "Attendance percentage", labels = scales::percent, breaks = seq(0, 1, 0.1)) +
+  scale_x_discrete(name = "Questions", 
+                   labels = c("Alternative number?", 
+                              "Call letter?", 
+                              "Permission to start?", 
+                              "Phone call?", 
+                              "Printout and JD?",
+                              "Unscheduled meetings?",
+                              "Venue clear?"
+                               )
+                   ) +   
+  scale_fill_manual("Answered", values = c("black", "blue"), na.value = "orange") + 
+  coord_flip() + 
+  ggtitle("Variation in Attendance Percentage across Survey Questions")
+```
+
+Next, attendance is observed across the 2 different position types and the 3 different interview types. Scheduled interviews for Niche positions have a high attendance rate. From the graph we can also see that there were no Walk-In interviews for Niche positions (only Scheduled Walk-Ins). 
+
+```{r, warning=FALSE}
+# Comparing attendance percentage between position (Niche/Routine) and interview type
+
+# Check that we have reasonable number of observations to make a rate comparison
+table(interview_data$position, interview_data$interview_type)
+
+interview_data %>% 
+  filter(is.na(date) == F) %>%
+  group_by(position, interview_type) %>%
+  summarize(attendance_pct = sum(attendance == "Yes")/n()) %>%
+  ggplot(aes(x = position, y = attendance_pct, fill = interview_type)) + 
+  geom_bar(stat = "identity", position = "dodge") + 
+  geom_hline(yintercept = c(0.6), linetype = "dotted") + 
+  scale_y_continuous(name = "Attendance percentage", labels = scales::percent) +
+  scale_x_discrete(name = "Position") +   
+  scale_fill_manual("Interview type", values = c("black", "blue", "orange")) +
+  ggtitle("Variation in Attendance Percentage across Position and Interview Type")
+```
+
+Finally, this last figure shows how attendance varies by Gender and Marital Status. One might expect Married individuals to have more commitments and to be more likely to miss an interview but it seems that is not the case. Also both men and women appear equally likely to be absent. 
+```{r}
+# Comparing attendance percentage between gender and marital status
+
+# Check that we have reasonable number of observations to make a rate comparison
+table(interview_data$gender, interview_data$marital_status)
+
+# Make the plot
+interview_data %>% 
+  filter(marital_status != "") %>%
+  group_by(marital_status, gender) %>%
+  summarize(attendance_pct = sum(attendance == "Yes")/n()) %>%
+  ggplot(aes(x = gender, y = attendance_pct, fill = marital_status)) + 
+  geom_bar(stat = "identity", position = "dodge") + 
+  scale_y_continuous(name = "Attendance Percentage", labels = scales::percent) +
+  scale_x_discrete(name = "Gender") + 
+  scale_fill_manual("legend", values = c("Married" = "black", "Single" = "blue")) + 
+  ggtitle("Interview Attendance Percentage by Gender and Marital Status")
+
+```
+
+### Correlation analysis
+
+In the first correlation plot, we see that attendance is not correlated with candidate location, job location, interview location or the native location of the candidate. There are some large positive correlations between the location variables which are quite obvious e.g. job location and interview location are highly correlated. 
+```{r}
+# Make all variables numeric
+df_numeric <- data.frame(sapply(interview_data, as.numeric))
+
+# Correlation between attendance and locations 
+M <- df_numeric %>% 
+       select(c_loc:native_loc, attendance) %>%
+       cor() 
+colnames(M)[3] <- "interview_loc   " # spaces needed due to issues with corrplot margin :)
+corrplot(M, type = "upper")
+```
+
+The second correlation plot shows that attendance is not associated with any of the new location variables either. Although it is surprising that attendance is uncorrelated with things like whether or not the venue is in the same city as the candidate, this is consistent with what was observed in the bar charts earlier. 
+```{r}
+# Correlation between attendance and new location variables
+M <- df_numeric %>% 
+       select(attendance:venue_in_native_city) %>%
+         cor() 
+colnames(M)[5] <- "venue_in_native_city       " # spaces needed due to issues with corrplot margin
+corrplot(M, type = "upper")
+```
+
+The third and final correlation figure shows that attendance *is* correlated with the survey answers although not very strongly. Furthermore, there is moderately strong correlation between the questions which means that candidates who answer "Yes" to one question are likely to answer "Yes" to the others too. 
+```{r}
+# Answers to questions
+M <- df_numeric %>% 
+       select(permission_to_start:attendance) %>%
+       cor(use = "pairwise.complete.obs")
+colnames(M)[2] <- "unscheduled_meetings    " # spaces needed due to issues with corrplot margin
+corrplot(M, type = "upper")
+```
+
+Lastly, I also ranked the highest correlation values between the response variable and the predictors that were statistically significant. Only the survey questions had correlations higher than 0.2. Among these, whether or not the candidate had obtained permission to start comfortably ranked the highest with a correlation coefficient of almost 0.4 
+```{r}
+# Numeric values and statistical significance
+df_numeric %>%
+  gather(var, value, -attendance) %>%
+  group_by(var) %>%
+  summarise(corr = cor(attendance, value, use = "pairwise.complete.obs"),
+            p_value = cor.test(attendance, value)$p.value,
+            p_value_e_notation = formatC(cor.test(attendance, value)$p.value, format = "e", digits = 2)) %>%
+  filter(p_value < 0.05 & abs(corr) > 0.2) %>%
+  arrange(desc(abs(corr))) %>%
+  select(var, corr, p_value_e_notation)
+```
+
+
+### Trends over time
+
+Since 2014 and 2017 only had a handful of interviews recorded, in this first figure just 2015 and 2016 are compared. We can see that 2016 had much more data recorded but there is no monthly pattern that is observable as such. It was interesting to note the large peak in interviews in February 2016.  
+```{r}
+# Comparison between years 2015 and 2016
+interview_data %>% 
+  filter(year %in% c(2015, 2016)) %>%
+  group_by(year, month) %>%
+  summarise(no_of_interviews = n()) %>%
+  ggplot(aes(x = month, y = no_of_interviews)) + 
+  geom_bar(stat = "identity", fill = "blue") + 
+  facet_grid(. ~ year) +
+  scale_x_continuous(name = "Month", breaks = 1:12) +
+  scale_y_continuous(name = "Number of interviews") +   
+  ggtitle("Comparison between 2015 and 2016 - Number of interviews over the year")
+```
+
+Again focusing on 2015 and 2016 but this time looking at proportion of absences, we can see that generally a higher proportion of candidates attended their interviews in 2016. 
+```{r}
+# Proportion over the months
+interview_data %>%
+  filter(year %in% c(2015, 2016)) %>%
+  group_by(year, month, attendance) %>%
+  summarize(no_of_interviews = n()) %>%
+  ggplot(aes(x = month, y = no_of_interviews, fill = attendance)) +
+  geom_bar(stat = "identity", position = "fill") +
+  facet_grid(. ~ year) +
+  scale_x_continuous(name = "Month", breaks = c(2,4,6,8,10,12)) +
+  scale_y_continuous(name = "", labels = scales::percent) + 
+  scale_fill_manual("Attendance", values = c("No" = "black", "Yes" = "blue")) + 
+  ggtitle("Proportion of absences over the years")
+```
+
+## Summary
+
+The main goal of this analysis was to see which variables influence interview attendance. The data was downloaded from Kaggle and contained information about interview attendance gathered from the recruitment industry in India from September 2014 till January 2017. 
+
+Extensive data cleaning had to be performed in order to prepare the data for analysis. The biggest issue with the data was the large number of incorrect and inconsistent values.
+
+Using the tidied data and with the help of some new variables, detailed exploratory data analysis was then conducted using both graphical (e.g. bar charts) and numerical techniques (e.g. correlation coefficients). 
+
+Some interesting insights are as follows: 
+
+*  Candidates who answer "Yes" to any survey question are much more likely to attend their interviews
+*  People who have scheduled interviews will be more likely to attend especially if they are interviewing for a "Niche" position 
+*  Attendance seemed to improve over time
+*  Location does not seem to play a big role in attendance
+
+Based on these insights, it could help if companies factor in the question survey in their decision on who to interview. This is particulary true for "Routine" positions and for less popular industries such as the Telecom sector.
+
+It could have been useful to have variables such as 'expected salary' and 'age' to see if they affected interview attendance. The data was also not that rich with respect to time, more useful trends could be revealed if more data is collected. It would also be interesting to build a predictive model using the cleaned data to try and predict whether a candidate will attend his/her interview or not. 
