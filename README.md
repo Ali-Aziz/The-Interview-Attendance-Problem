@@ -1,1 +1,9 @@
 # The-Interview-Attendance-Problem
+
+Summary:
+Performed data wrangling on a messy data set obtained from Kaggle and then analyzed the data to see how interview attendance depended on various factors using both numerical and visual methods.
+
+RPubs link: 
+http://rpubs.com/Ali_Aziz/382329
+
+To reproduce the RPubs/HTML output, please download the Rmd file and the data and then Knit the Rmd file. 
